@@ -756,6 +756,26 @@ public:
     InvalidationTracker->InvalidateAlignedInterval(Start, Length, false);
   }
 
+  // Called by MonoBackpatcherWrite with CodeInvalidationMutex held exclusively. Untrap (which
+  // also invalidates the range), store, retrap. BeginUntrackedWriteLocked's NtProtectVirtualMemory
+  // notification is skipped while IntervalsLock is held, so nothing here re-enters the mutex.
+  // ThreadCreationMutex is deliberately not taken: it orders before CodeInvalidationMutex.
+  bool WriteUntrackedLocked(FEXCore::Core::InternalThreadState* Thread, uint64_t Address, uint8_t Size, uint64_t Value) override {
+    if (!InvalidationTracker || (Size != 4 && Size != 8)) {
+      return false;
+    }
+    if (!InvalidationTracker->BeginUntrackedWriteLocked(Address, Size)) {
+      return false;
+    }
+    if (Size == 8) {
+      *reinterpret_cast<volatile uint64_t*>(Address) = Value;
+    } else {
+      *reinterpret_cast<volatile uint32_t*>(Address) = static_cast<uint32_t>(Value);
+    }
+    InvalidationTracker->ReprotectRWXIntervals(Address, Size);
+    return true;
+  }
+
   void MarkOvercommitRange(uint64_t Start, uint64_t Length) override {
     OvercommitTracker->MarkRange(Start, Length);
   }

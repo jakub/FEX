@@ -2463,6 +2463,15 @@ void ContextImpl::MonoBackpatcherWrite(FEXCore::Core::CpuStateFrame* Frame, uint
       Dest = RW;
     }
     ios_fex_mono_count_helper(RW ? 0 : 1);
+
+    /* No alias: the target is plain memory, e.g. an executable NT heap that the host keeps
+     * read-write (virtual_ios.c VPROT_HEAP). Its pages may be write-trapped for SMC detection,
+     * and a direct store would fault into HandleRWXAccessViolation, which takes
+     * CodeInvalidationMutex -- already held here, so the thread would wait on itself forever.
+     * Let the frontend untrap, store and retrap under the lock we hold instead. */
+    if (!RW && CTX->SyscallHandler->WriteUntrackedLocked(Thread, Dest, Size, Value)) {
+      // stored; fall through to the invalidation below
+    } else
 #endif
 
     if (Size == 8) {
